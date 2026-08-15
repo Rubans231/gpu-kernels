@@ -70,7 +70,7 @@ torch::Tensor matmul(torch::Tensor m, torch::Tensor n) {
     dim3 blocks(cdiv(w, tpb.x), cdiv(h, tpb.y));
 
     matmul_k<<<blocks, tpb>>>(
-        m.data_ptr<float>(), n.data_ptr<float>(), output.data_ptr(), h, w, k);
+        m.data_ptr<float>(), n.data_ptr<float>(), output.data_ptr<float>(), h, w, k);
     C10_CUDA_KERNEL_LAUNCH_CHECK(); // Check for errors during kernel launch in dev phase
     return output;
 }
