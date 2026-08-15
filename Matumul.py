@@ -4,6 +4,7 @@ import gzip, pickle
 from urllib.request import urlretrieve
 from pathlib import Path
 from torch import tensor
+import time
 
 # MNIST DATA PULL
 
@@ -28,7 +29,6 @@ weights
 m1 = x_train
 m2 = weights
 m1.shape, m2.shape
-tr = m1 @ m2
 
 # Best debugging practice for dev to check for errors
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -78,7 +78,9 @@ torch::Tensor matmul(torch::Tensor m, torch::Tensor n) {
 # Store the method to a variable to call into inline
 cpp_src = "torch::Tensor matmul(torch::Tensor m, torch::Tensor n);"
 
-# Load_inline
+# Timed build
+build_start = time.perf_counter()
+
 module = load_inline(
     name="matmul_c",
     cuda_sources=[cuda_src],
@@ -88,5 +90,47 @@ module = load_inline(
     verbose=True,
 )
 
+build_end = time.perf_counter()
+
+print(f"Extension build/load: {(build_end - build_start):.3f}s")
+
+# ================================================
+#       Timed with no warmup
+# ================================================
+
+# timed cpu pytorch matmul
+start = time.perf_counter()
+tr = m1 @ m2
+end = time.perf_counter()
+
 # m1 and m2 but now stored as contiguous tensors in the gpu instead of cpu
 m1c, m2c = m1.contiguous().cuda(), m2.contiguous().cuda()
+
+# timed gpu pytorch matmul
+# No warmup in this case means gpu-libraries initialization overhead time
+torch.cuda.synchronize()
+start = time.perf_counter()
+
+tr_gpu = m1c @ m2c
+
+torch.cuda.synchronize()
+end = time.perf_counter()
+
+print(f"Pytorch Gpu: {(end - start) * 1000:.3f}ms")
+
+# timed Custom kernel matmul
+# No warmup in this case means ninja build overhead
+torch.cuda.synchronize()
+start = time.perf_counter()
+
+kernelcuda = module.matmul(m1c, m2c)
+
+torch.cuda.synchronize()
+end = time.perf_counter()
+
+print(f"Custom CUDA: {(end - start) * 1000:.3f}ms")
+
+# abs difference between the value calculated by cuda and pytorch cpu
+torch.cuda.synchronize()
+print(torch.allclose(kernelcuda.cpu(), tr, atol=1e-3))
+print((kernelcuda.cpu() - tr).abs().max().item())
