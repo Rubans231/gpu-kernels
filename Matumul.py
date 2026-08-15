@@ -1,4 +1,4 @@
-import torch, os, math
+import torch, os
 from torch.utils.cpp_extension import load_inline
 import gzip, pickle
 from urllib.request import urlretrieve
@@ -19,11 +19,10 @@ with gzip.open(path_gz, "rb") as f:
 x_train, y_train, x_valid, y_valid = map(tensor, (x_train, y_train, x_valid, y_valid))
 x_train.shape, x_train.type()
 
-imgs = x_train.reshape((-1, 28, 28))
-imgs.shape
-
 torch.manual_seed(1)
-weights = torch.randn(784, 10)
+weights = torch.randn(
+    784, 10
+)  # 28 x 28 = 784(The dataset has images of 28x28) and 10 because there are 10 classes in the dataset and thus requiring 10 cloumns
 weights
 
 m1 = x_train
@@ -72,7 +71,7 @@ torch::Tensor matmul(torch::Tensor m, torch::Tensor n) {
 
     matmul_k<<<blocks, tpb>>>(
         m.data_ptr<float>(), n.data_ptr<float>(), output.data_ptr(), h, w, k);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK(); // Check for errors during kernel launch in dev phase
     return output;
 }
 """
@@ -85,9 +84,9 @@ module = load_inline(
     cuda_sources=[cuda_src],
     cpp_sources=[cpp_src],
     functions=["matmul"],
-    extra_cuda_cflags=["-02"],
+    extra_cuda_cflags=["-O2"],
     verbose=True,
 )
 
-# m1 and m2 but now stored contiguous in cuda instead of cpu
+# m1 and m2 but now stored as contiguous tensors in the gpu instead of cpu
 m1c, m2c = m1.contiguous().cuda(), m2.contiguous().cuda()
