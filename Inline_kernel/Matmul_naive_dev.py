@@ -1,10 +1,11 @@
-import torch, os
+import torch
 from torch.utils.cpp_extension import load_inline
 import gzip, pickle
 from urllib.request import urlretrieve
 from pathlib import Path
 from torch import tensor
 import time
+# import os
 
 # MNIST DATA PULL
 
@@ -29,7 +30,7 @@ m1 = x_train
 m2 = weights
 
 # Best debugging practice for dev to check for errors
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 # CUDA C
 cuda_src = r"""
