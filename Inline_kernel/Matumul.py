@@ -24,11 +24,9 @@ torch.manual_seed(1)
 weights = torch.randn(
     784, 10
 )  # 28 x 28 = 784(The dataset has images of 28x28) and 10 because there are 10 classes in the dataset and thus requiring 10 cloumns
-weights
 
 m1 = x_train
 m2 = weights
-m1.shape, m2.shape
 
 # Best debugging practice for dev to check for errors
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -92,6 +90,10 @@ module = load_inline(
 
 build_end = time.perf_counter()
 
+print(
+    "================================ No Warmup ======================================"
+)
+
 print(f"Extension build/load: {(build_end - build_start):.3f}s")
 
 # ================================================
@@ -116,10 +118,9 @@ tr_gpu = m1c @ m2c
 torch.cuda.synchronize()
 end = time.perf_counter()
 
-print(f"Pytorch Gpu: {(end - start) * 1000:.3f}ms")
+print(f"Pytorch Gpu with no warmup: {(end - start) * 1000:.3f}ms")
 
 # timed Custom kernel matmul
-# No warmup in this case means ninja build overhead if its the first time running
 torch.cuda.synchronize()
 start = time.perf_counter()
 
@@ -128,12 +129,25 @@ kernelcuda = module.matmul(m1c, m2c)
 torch.cuda.synchronize()
 end = time.perf_counter()
 
-print(f"Custom CUDA: {(end - start) * 1000:.3f}ms")
+print(f"Custom kernel with no warmup: {(end - start) * 1000:.3f}ms")
+print(
+    "\n============== Value difference b/w pytorch-cpu and custom kernel ==================\n"
+)
 
 # abs difference between the value calculated by cuda and pytorch cpu
 torch.cuda.synchronize()
-print(torch.allclose(kernelcuda.cpu(), tr, atol=1e-3))
-print((kernelcuda.cpu() - tr).abs().max().item())
+print(
+    "Is the value calculated by pytorch cpu close to the value calculated by my custom kernel: ",
+    torch.allclose(kernelcuda.cpu(), tr, atol=1e-3),
+)
+print(
+    "How much is the difference between the two values: ",
+    (kernelcuda.cpu() - tr).abs().max().item(),
+)
+
+print(
+    "\n================================= After warmup =====================================\n"
+)
 
 # ================================================
 #       warmup
@@ -178,3 +192,9 @@ end = time.perf_counter()
 print(
     f"Custom kernel avg after warmup and multiple iterations: {(end - start) / 100 * 1000:.3f}ms"
 )
+
+# ================================================
+#       Conclusion
+# ================================================
+
+# Not so bad for NAIVEE way, but lets make it faster, cuz why not
