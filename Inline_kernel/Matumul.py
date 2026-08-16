@@ -162,7 +162,7 @@ for _ in range(10):
 torch.cuda.synchronize()
 
 # ================================================
-#       Timed and averaged for pytorch after warmup
+#      CPU Timed and averaged for pytorch after warmup using perf_counter
 # ================================================
 
 start = time.perf_counter()
@@ -178,7 +178,7 @@ print(
 )
 
 # ================================================
-#       Timed and averaged for custom kernel after warmup
+#      CPU Timed and averaged for custom kernel after warmup using perf_counter
 # ================================================
 
 start = time.perf_counter()
@@ -194,7 +194,64 @@ print(
 )
 
 # ================================================
+#       CUDA events Timing instead of perf_counter for pytorch GPU
+# ================================================
+
+print(
+    "\n================ CUDA events for pytorch gpu and custom kernel ==================\n"
+)
+
+for _ in range(10):
+    m1c @ m2c
+
+torch.cuda.synchronize()
+
+start = torch.cuda.Event(enable_timing=True)
+end = torch.cuda.Event(enable_timing=True)
+
+start.record()
+
+for _ in range(100):
+    m1c @ m2c
+
+end.record()
+
+torch.cuda.synchronize()
+
+print(
+    f"pytorch GPU time measured with CUDA events: {start.elapsed_time(end) / 100:.3f}ms"
+)
+
+# ================================================
+#       CUDA events Timing for Custom kernel
+# ================================================
+
+for _ in range(10):
+    module.matmul(m1c, m2c)
+
+torch.cuda.synchronize()
+
+start = torch.cuda.Event(enable_timing=True)
+end = torch.cuda.Event(enable_timing=True)
+
+start.record()
+
+for _ in range(100):
+    module.matmul(m1c, m2c)
+
+end.record()
+
+torch.cuda.synchronize()
+
+print(
+    f"Custom kernel time measured with CUDA events: {start.elapsed_time(end) / 100:.3f}ms"
+)
+
+# ================================================
 #       Conclusion
 # ================================================
 
-# Not so bad for NAIVEE way, but lets make it faster, cuz why not
+# Build overhead is a thing in custom inline_cuda kernel but it is a one time thing. For pytorch it is initialization overhead.
+# There is two forms of time benchmarking, one is the CPU's perf_counter which does have a bit of overhead though almost negligible, the second is CUDA events which is most accurate in this scenario
+
+# Timing diff is not so bad for NAIVEE way, but lets make it faster, cuz why not
