@@ -24,11 +24,9 @@ torch.manual_seed(1)
 weights = torch.randn(
     784, 10
 )  # 28 x 28 = 784(The dataset has images of 28x28) and 10 because there are 10 classes in the dataset and thus requiring 10 cloumns
-weights
 
 m1 = x_train
 m2 = weights
-m1.shape, m2.shape
 
 # Best debugging practice for dev to check for errors
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -92,6 +90,10 @@ module = load_inline(
 
 build_end = time.perf_counter()
 
+print(
+    "================================ No Warmup ======================================"
+)
+
 print(f"Extension build/load: {(build_end - build_start):.3f}s")
 
 # ================================================
@@ -116,10 +118,9 @@ tr_gpu = m1c @ m2c
 torch.cuda.synchronize()
 end = time.perf_counter()
 
-print(f"Pytorch Gpu: {(end - start) * 1000:.3f}ms")
+print(f"Pytorch Gpu with no warmup: {(end - start) * 1000:.3f}ms")
 
 # timed Custom kernel matmul
-# No warmup in this case means ninja build overhead
 torch.cuda.synchronize()
 start = time.perf_counter()
 
@@ -128,9 +129,129 @@ kernelcuda = module.matmul(m1c, m2c)
 torch.cuda.synchronize()
 end = time.perf_counter()
 
-print(f"Custom CUDA: {(end - start) * 1000:.3f}ms")
+print(f"Custom kernel with no warmup: {(end - start) * 1000:.3f}ms")
+print(
+    "\n============== Value difference b/w pytorch-cpu and custom kernel ==================\n"
+)
 
 # abs difference between the value calculated by cuda and pytorch cpu
 torch.cuda.synchronize()
-print(torch.allclose(kernelcuda.cpu(), tr, atol=1e-3))
-print((kernelcuda.cpu() - tr).abs().max().item())
+print(
+    "Is the value calculated by pytorch cpu close to the value calculated by my custom kernel: ",
+    torch.allclose(kernelcuda.cpu(), tr, atol=1e-3),
+)
+print(
+    "How much is the difference between the two values: ",
+    (kernelcuda.cpu() - tr).abs().max().item(),
+)
+
+print(
+    "\n================================= After warmup =====================================\n"
+)
+
+# ================================================
+#       warmup
+# ================================================
+
+for _ in range(10):
+    m1c @ m2c
+
+for _ in range(10):
+    module.matmul(m1c, m2c)
+
+torch.cuda.synchronize()
+
+# ================================================
+#      CPU Timed and averaged for pytorch after warmup using perf_counter
+# ================================================
+
+start = time.perf_counter()
+
+for _ in range(100):
+    m1c @ m2c
+
+torch.cuda.synchronize()
+end = time.perf_counter()
+
+print(
+    f"Pytorch avg after warmup and multiple iterations: {(end - start) / 100 * 1000:.3f}ms"
+)
+
+# ================================================
+#      CPU Timed and averaged for custom kernel after warmup using perf_counter
+# ================================================
+
+start = time.perf_counter()
+
+for _ in range(100):
+    module.matmul(m1c, m2c)
+
+torch.cuda.synchronize()
+
+end = time.perf_counter()
+print(
+    f"Custom kernel avg after warmup and multiple iterations: {(end - start) / 100 * 1000:.3f}ms"
+)
+
+# ================================================
+#       CUDA events Timing instead of perf_counter for pytorch GPU
+# ================================================
+
+print(
+    "\n================ CUDA events for pytorch gpu and custom kernel ==================\n"
+)
+
+for _ in range(10):
+    m1c @ m2c
+
+torch.cuda.synchronize()
+
+start = torch.cuda.Event(enable_timing=True)
+end = torch.cuda.Event(enable_timing=True)
+
+start.record()
+
+for _ in range(100):
+    m1c @ m2c
+
+end.record()
+
+torch.cuda.synchronize()
+
+print(
+    f"pytorch GPU time measured with CUDA events: {start.elapsed_time(end) / 100:.3f}ms"
+)
+
+# ================================================
+#       CUDA events Timing for Custom kernel
+# ================================================
+
+for _ in range(10):
+    module.matmul(m1c, m2c)
+
+torch.cuda.synchronize()
+
+start = torch.cuda.Event(enable_timing=True)
+end = torch.cuda.Event(enable_timing=True)
+
+start.record()
+
+for _ in range(100):
+    module.matmul(m1c, m2c)
+
+end.record()
+
+torch.cuda.synchronize()
+
+print(
+    f"Custom kernel time measured with CUDA events: {start.elapsed_time(end) / 100:.3f}ms"
+)
+
+# ================================================
+#       Conclusion
+# ================================================
+
+# Build overhead is a thing in custom inline_cuda kernel but it is a one time thing. For pytorch it is initialization overhead.
+# There is two forms of time benchmarking, one is the CPU's perf_counter which does have a bit of overhead though almost negligible, the second is CUDA events which is most accurate in this scenario
+
+# Timing diff is not so bad for NAIVEE way, but lets make it faster, cuz why not
