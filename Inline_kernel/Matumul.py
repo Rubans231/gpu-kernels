@@ -119,7 +119,7 @@ end = time.perf_counter()
 print(f"Pytorch Gpu: {(end - start) * 1000:.3f}ms")
 
 # timed Custom kernel matmul
-# No warmup in this case means ninja build overhead
+# No warmup in this case means ninja build overhead if its the first time running
 torch.cuda.synchronize()
 start = time.perf_counter()
 
@@ -134,3 +134,47 @@ print(f"Custom CUDA: {(end - start) * 1000:.3f}ms")
 torch.cuda.synchronize()
 print(torch.allclose(kernelcuda.cpu(), tr, atol=1e-3))
 print((kernelcuda.cpu() - tr).abs().max().item())
+
+# ================================================
+#       warmup
+# ================================================
+
+for _ in range(10):
+    m1c @ m2c
+
+for _ in range(10):
+    module.matmul(m1c, m2c)
+
+torch.cuda.synchronize()
+
+# ================================================
+#       Timed and averaged for pytorch after warmup
+# ================================================
+
+start = time.perf_counter()
+
+for _ in range(100):
+    m1c @ m2c
+
+torch.cuda.synchronize()
+end = time.perf_counter()
+
+print(
+    f"Pytorch avg after warmup and multiple iterations: {(end - start) / 100 * 1000:.3f}ms"
+)
+
+# ================================================
+#       Timed and averaged for custom kernel after warmup
+# ================================================
+
+start = time.perf_counter()
+
+for _ in range(100):
+    module.matmul(m1c, m2c)
+
+torch.cuda.synchronize()
+
+end = time.perf_counter()
+print(
+    f"Custom kernel avg after warmup and multiple iterations: {(end - start) / 100 * 1000:.3f}ms"
+)
