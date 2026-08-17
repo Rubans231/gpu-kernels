@@ -153,10 +153,7 @@ torch::Tensor matmul_tiled(torch::Tensor m, torch::Tensor n) {
 }
 """
 # Store the method to a variable to call into inline
-cpp_src = R"""(
-torch::Tensor matmul(torch::Tensor m, torch::Tensor n);
-torch::Tensor matmul_tiled(torch::Tensor m, torch::Tensor n);
-)"""
+cpp_src = "torch::Tensor matmul(torch::Tensor m, torch::Tensor n);torch::Tensor matmul_tiled(torch::Tensor m, torch::Tensor n);"
 
 # Timed build
 # build_start = time.perf_counter()
@@ -325,9 +322,28 @@ end.record()
 
 torch.cuda.synchronize()
 
-print(
-    f"Custom kernel time measured with CUDA events: {start.elapsed_time(end) / 100:.3f}ms"
-)
+naive_time = start.elapsed_time(end) / 100
+print(f"Custom kernel time measured with CUDA events: {naive_time:.3f}ms")
+
+# ================================================
+#       CUDA events Timing for tiled Custom kernel
+# ================================================
+
+start = torch.cuda.Event(enable_timing=True)
+end = torch.cuda.Event(enable_timing=True)
+
+start.record()
+
+for _ in range(100):
+    module.matmul_tiled(m1c, m2c)
+
+end.record()
+
+torch.cuda.synchronize()
+
+tiled_time = start.elapsed_time(end) / 100
+print(f"Tiled custom: {tiled_time:.3f}ms")
+print(f"Speedup difference: {naive_time / tiled_time:.2f}x")
 
 # ================================================
 #       Conclusion
