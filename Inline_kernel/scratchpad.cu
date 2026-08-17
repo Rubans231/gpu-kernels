@@ -1,3 +1,6 @@
+#include "ATen/core/TensorBody.h"
+#include "ATen/ops/zero.h"
+#include "c10/core/Device.h"
 #include <__clang_cuda_builtin_vars.h>
 #include <__clang_cuda_runtime_wrapper.h>
 #include <c10/cuda/CUDAException.h>
@@ -94,4 +97,26 @@ __global__ void matmul_k_tiled(float *m, float *n, float *out, int h, int w, int
     // Write result to mem
     if (r < h && c < w)
         out[r * w + c] = o;
+}
+
+torch::Tensor matmul_tiled(torch::Tensor m, torch::Tensor n) {
+    CHECK_INPUT(m);
+    CHECK_INPUT(n);
+
+    int h = m.size(0);
+    int k = m.size(1);
+    int w = n.size(1);
+
+    TORCH_CHECK(k == n.size(0), "Size mismatch!");
+
+    auto output = torch::zeros({h, w}, m.options());
+
+    dim3 tpb(TILE, TILE);
+    dim3 blocks(cdiv(w, TILE), cdiv(h, TILE));
+
+    matmul_k_tiled<<<blocks, tpb>>>(m.data_ptr<float>(), n.data_ptr<float>(), output.data_ptr<float>(), h, w, k);
+
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+    return output;
 }
