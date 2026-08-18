@@ -3,8 +3,8 @@ from torch.utils.cpp_extension import load_inline
 import gzip, pickle
 from urllib.request import urlretrieve
 from pathlib import Path
-from torch import Tensor, tensor
-import time
+from torch import tensor
+# import time
 # import os
 
 # MNIST DATA PULL
@@ -19,7 +19,7 @@ if not path_gz.exists():
 with gzip.open(path_gz, "rb") as f:
     ((x_train, y_train), (x_valid, y_valid), _) = pickle.load(f, encoding="latin-1")
 x_train, y_train, x_valid, y_valid = map(tensor, (x_train, y_train, x_valid, y_valid))
-x_train.shape, x_train.type()
+# x_train.shape, x_train.type()
 
 torch.manual_seed(1)
 weights = torch.randn(
