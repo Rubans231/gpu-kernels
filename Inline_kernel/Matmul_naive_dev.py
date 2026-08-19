@@ -151,18 +151,74 @@ torch::Tensor matmul_tiled(torch::Tensor m, torch::Tensor n) {
 
     return output;
 }
+
+__global__ void matmul_warp_per_row_kernel(float *m, float *n, float *out, int h, int w, int k) {
+    int warp_in_block = threadIdx.x / 32;
+    int warps_per_block = blockDim.x / 32;
+
+    int row = blockIdx.x * warps_per_block + warp_in_block;
+    int lane = threadIdx.x & 31;
+
+    float acc[16];
+    for (int c = 0; c < 16; c++)
+        acc[c] = 0.0f;
+
+    for (int kk = lane; kk < k; kk += 32) {
+        float x_val = m[row * k + kk];
+        float *n_row = n + kk * w;
+
+        for (int c = 0; c < 16; c++) {
+            if (c < w)
+                acc[c] += x_val * n_row[c];
+        }
+    }
+
+    for (int c = 0; c < 16; c++) {
+
+        if (c >= w)
+            continue;
+        float v = acc[c];
+
+        for (int offset = 16; offset > 0; offset >>= 1)
+            v += __shfl_down_sync(0xffffffff, v, offset);
+        if (lane == 0)
+            out[row * w + c] = v;
+    }
+}
+
+torch::Tensor matmul_warp_per_row(torch::Tensor m, torch::Tensor n) {
+    CHECK_INPUT(m);
+    CHECK_INPUT(n);
+
+    int h = m.size(0);
+    int k = m.size(1);
+    int w = n.size(1);
+
+    TORCH_CHECK(k == n.size(0), "Size mismatch!");
+
+    auto output = torch::empty({h, w}, m.options());
+
+    int threads = 256;
+    int warps_per_block = threads / 32;
+    int blocks = cdiv(h, warps_per_block);
+
+    matmul_warp_per_row_kernel<<<blocks, threads>>>(m.data_ptr<float>(), n.data_ptr<float>(), output.data_ptr<float>(),
+                                                    h, w, k);
+
+    return output;
+}
 """
 # Store the method to a variable to call into inline
-cpp_src = "torch::Tensor matmul(torch::Tensor m, torch::Tensor n);torch::Tensor matmul_tiled(torch::Tensor m, torch::Tensor n);"
+cpp_src = "torch::Tensor matmul(torch::Tensor m, torch::Tensor n);torch::Tensor matmul_tiled(torch::Tensor m, torch::Tensor n);torch::Tensor matmul_warp_per_row(torch::Tensor m, torch::Tensor n);"
 
 # Timed build
 # build_start = time.perf_counter()
 
 module = load_inline(
-    name="matmul_naive_vs_tiled",
+    name="matmul_naive_vs_tiled_vs_warp_per_row",
     cuda_sources=[cuda_src],
     cpp_sources=[cpp_src],
-    functions=["matmul", "matmul_tiled"],
+    functions=["matmul", "matmul_tiled", "matmul_warp_per_row"],
     extra_cuda_cflags=["-O2"],
     verbose=True,
 )
@@ -277,7 +333,42 @@ m1c, m2c = m1.contiguous().cuda(), m2.contiguous().cuda()
 # ================================================
 
 print(
-    "\n================ CUDA events for pytorch gpu and custom kernel ==================\n"
+    "\n============== Value difference b/w pytorch and matmul_warp_per_row ==================\n"
+)
+
+# abs difference between the value calculated by cuda and pytorch cpu
+torch.cuda.synchronize()
+
+matmul_warp_row_output = module.matmul_warp_per_row(m1c, m2c)
+pytorch_ref = m1c @ m2c
+
+max_diff = (pytorch_ref - matmul_warp_row_output).abs().max().item()
+print(
+    f"Is the value calculated by pytorch close to the value calculated by matmul_warp_per_row: {max_diff:.6e}"
+)
+assert max_diff < 1e-2, (
+    "matmul_warp_per_row_kernel not relatively close to torch's matmul, please check output validity before trusting timing"
+)
+
+print(
+    "\n============== Value difference b/w pytorch and matmul_tiled ==================\n"
+)
+
+# abs difference between the value calculated by cuda and pytorch cpu
+torch.cuda.synchronize()
+
+matmul_warp_row_output = module.matmul_tiled(m1c, m2c)
+
+max_diff = (pytorch_ref - matmul_warp_row_output).abs().max().item()
+print(
+    f"Is the value calculated by pytorch close to the value calculated by matmul_tiled: {max_diff:.6e}"
+)
+assert max_diff < 1e-2, (
+    "matmul_k_tiled not relatively close to torch's matmul, please check output validity before trusting timing"
+)
+
+print(
+    "\n================ CUDA events for pytorch gpu and custom kernels ==================\n"
 )
 
 # All warmup compressed in one space
@@ -285,6 +376,7 @@ for _ in range(10):
     m1c @ m2c
     module.matmul(m1c, m2c)
     module.matmul_tiled(m1c, m2c)
+    module.matmul_warp_per_row(m1c, m2c)
 
 torch.cuda.synchronize()
 
@@ -344,6 +436,31 @@ torch.cuda.synchronize()
 tiled_time = start.elapsed_time(end) / 100
 print(f"Tiled custom: {tiled_time:.3f}ms")
 print(f"Speedup difference: {naive_time / tiled_time:.2f}x")
+
+# ================================================
+#       CUDA events Timing for matmul_warp_per_row_kernel
+# ================================================
+
+torch.cuda.synchronize()
+
+start = torch.cuda.Event(enable_timing=True)
+end = torch.cuda.Event(enable_timing=True)
+
+start.record()
+
+for _ in range(100):
+    module.matmul_warp_per_row(m1c, m2c)
+
+end.record()
+
+torch.cuda.synchronize()
+
+per_row_warp_time = start.elapsed_time(end) / 100
+print(f"warp_per_row_kernel time measured with CUDA events: {per_row_warp_time:.3f}ms")
+print(
+    f"Speedup difference b/w tiled and warp_per_row: {tiled_time / per_row_warp_time:.2f}x"
+)
+
 
 # ================================================
 #       Conclusion
