@@ -1,4 +1,5 @@
 #include "ATen/core/TensorBody.h"
+#include "ATen/ops/empty.h"
 #include "ATen/ops/zero.h"
 #include "c10/core/Device.h"
 #include <__clang_cuda_builtin_vars.h>
@@ -117,6 +118,62 @@ torch::Tensor matmul_tiled(torch::Tensor m, torch::Tensor n) {
     matmul_k_tiled<<<blocks, tpb>>>(m.data_ptr<float>(), n.data_ptr<float>(), output.data_ptr<float>(), h, w, k);
 
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+    return output;
+}
+
+__global__ void matmul_warp_per_row_kernel(float *m, float *n, float *out, int h, int w, int k) {
+    int warp_in_block = threadIdx.x / 32;
+    int warps_per_block = blockDim.x / 32;
+
+    int row = blockIdx.x * warps_per_block + warp_in_block;
+    int lane = threadIdx.x & 31;
+
+    float acc[16];
+    for (int c = 0; c < 16; c++)
+        acc[c] = 0.0f;
+
+    for (int kk = lane; kk < k; kk += 32) {
+        float x_val = m[row * k + kk];
+        float *n_row = n + kk * w;
+
+        for (int c = 0; c < 16; c++) {
+            if (c < w)
+                acc[c] += x_val * n_row[c];
+        }
+    }
+
+    for (int c = 0; c < 16; c++) {
+
+        if (c >= w)
+            continue;
+        float v = acc[c];
+
+        for (int offset = 16; offset > 0; offset >>= 1)
+            v += __shfl_down_sync(0xffffffff, v, offset);
+        if (lane == 0)
+            out[row * w + c] = v;
+    }
+}
+
+torch::Tensor matmul_warp_per_row(torch::Tensor m, torch::Tensor n) {
+    CHECK_INPUT(m);
+    CHECK_INPUT(n);
+
+    int h = m.size(0);
+    int k = m.size(1);
+    int w = n.size(1);
+
+    TORCH_CHECK(k == n.size(0), "Size mismatch!");
+
+    auto output = torch::empty({h, w}, m.options());
+
+    int threads = 256;
+    int warps_per_block = threads / 32;
+    int blocks = cdiv(h, warps_per_block);
+
+    matmul_warp_per_row_kernel<<<blocks, threads>>>(m.data_ptr<float>(), n.data_ptr<float>(), output.data_ptr<float>(),
+                                                    h, w, k);
 
     return output;
 }
