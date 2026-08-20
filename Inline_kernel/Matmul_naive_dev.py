@@ -152,7 +152,7 @@ torch::Tensor matmul_tiled(torch::Tensor m, torch::Tensor n) {
     return output;
 }
 
-__global__ void matmul_warp_per_row_kernel(float *m, float *n, float *out, int h, int w, int k) {
+__global__ void matmul_warp_per_row_kernel(const float* __restrict__ m, const float* __restrict__ n, float* __restrict__ out, int h, int w, int k) {
     int warp_in_block = threadIdx.x / 32;
     int warps_per_block = blockDim.x / 32;
 
@@ -164,8 +164,8 @@ __global__ void matmul_warp_per_row_kernel(float *m, float *n, float *out, int h
         acc[c] = 0.0f;
 
     for (int kk = lane; kk < k; kk += 32) {
-        float x_val = m[row * k + kk];
-        float *n_row = n + kk * w;
+        float x_val = __ldg(&m[row * k + kk]);
+        const float *n_row = n + kk * w;
 
         for (int c = 0; c < 16; c++) {
             if (c < w)
