@@ -152,7 +152,7 @@ torch::Tensor matmul_tiled(torch::Tensor m, torch::Tensor n) {
     return output;
 }
 
-__global__ void matmul_warp_per_row_kernel(const float* __restrict__ m, const float* __restrict__ n, float* __restrict__ out, int h, int w, int k) {
+__global__ __launch_bounds__(256) void matmul_warp_per_row_kernel(const float* __restrict__ m, const float* __restrict__ n, float* __restrict__ out, int h, int w, int k) {
     int warp_in_block = threadIdx.x / 32;
     int warps_per_block = blockDim.x / 32;
 
