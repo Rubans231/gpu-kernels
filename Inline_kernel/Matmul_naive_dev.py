@@ -160,6 +160,7 @@ __global__ void matmul_warp_per_row_kernel(const float* __restrict__ m, const fl
     int lane = threadIdx.x & 31;
 
     float acc[16];
+    #pragma unroll
     for (int c = 0; c < 16; c++)
         acc[c] = 0.0f;
 
@@ -167,18 +168,21 @@ __global__ void matmul_warp_per_row_kernel(const float* __restrict__ m, const fl
         float x_val = __ldg(&m[row * k + kk]);
         const float *n_row = n + kk * w;
 
+        #pragma unroll
         for (int c = 0; c < 16; c++) {
             if (c < w)
                 acc[c] += x_val * n_row[c];
         }
     }
 
+    #pragma unroll
     for (int c = 0; c < 16; c++) {
 
         if (c >= w)
             continue;
         float v = acc[c];
-
+        
+        #pragma unroll
         for (int offset = 16; offset > 0; offset >>= 1)
             v += __shfl_down_sync(0xffffffff, v, offset);
         if (lane == 0)
