@@ -1,1 +1,77 @@
+# --- Profiling artifacts (the stuff that leaked env/host info) ---
+*.sqlite
+*.sqlite3
+*.ncu-rep
+*.nsys-rep
+*.qdrep
+*.qdstrm
+*.nvvp
+trace.json
+profile_report*
+*_stats.sqlite
+
+# --- CUDA build artifacts ---
+*.o
+*.obj
+*.so
+*.a
+*.lib
+*.exe
+*.out
+*.ptx
+*.cubin
+*.fatbin
+*.i
+*.ii
+*.gpu
+*.stub.c
+*.stub.h
+
+# --- torch.utils.cpp_extension / load_inline build cache ---
+# (this is the big one for your workflow — every load_inline() call
+# compiles into a cache dir with hashed names, timestamps, absolute paths)
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# torch extensions cache (usually under ~/.cache but sometimes local)
+.cache/
+torch_extensions/
+
+# --- Python environment ---
+.venv/
+venv/
+env/
+*.egg
+*.whl
+pip-log.txt
+.python-version
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+*.ipynb  # optional: uncomment if you don't want notebook outputs (which can embed paths/hostnames) in history
+
+# --- Data ---
 data/
+*.pkl.gz
+*.npz
+*.npy
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Environment / secrets (just in case) ---
+.env
+.env.*
+*.pem
+*.key
